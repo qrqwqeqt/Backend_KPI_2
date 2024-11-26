@@ -1,0 +1,3 @@
+users = {}
+categories = {}
+records = {}
