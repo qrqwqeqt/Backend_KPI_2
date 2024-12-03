@@ -31,7 +31,15 @@ def create_user():
 @app.route('/users', methods=['GET'])
 def get_users():
     return jsonify(list(users.values()))
-@app.route('/category', methods=['GET', 'POST', 'DELETE'])
+
+@app.route('/category/<int:category_id>', methods=['DELETE'])
+def category_by_id(category_id):
+    if category_id not in categories:
+        return jsonify({"error": "Category not found"}), 404
+    del categories[category_id]
+    return jsonify({"message": "Category deleted"})
+
+@app.route('/category', methods=['GET', 'POST'])
 def handle_categories():
     if request.method == 'GET':
         return jsonify(list(categories.values()))
@@ -42,13 +50,7 @@ def handle_categories():
         category_id = generate_id(categories)
         categories[category_id] = {"id": category_id, "name": data["name"]}
         return jsonify(categories[category_id]), 201
-    elif request.method == 'DELETE':
-        data = request.json
-        category_id = data.get("id")
-        if not category_id or category_id not in categories:
-            return jsonify({"error": "Invalid category ID"}), 400
-        del categories[category_id]
-        return jsonify({"message": "Category deleted"})
+
 
 @app.route('/record/<int:record_id>', methods=['GET', 'DELETE'])
 def record_by_id(record_id):
@@ -78,14 +80,23 @@ def handle_records():
     elif request.method == 'GET':
         user_id = request.args.get("user_id", type=int)
         category_id = request.args.get("category_id", type=int)
+        
+        print(f"user_id={user_id}, category_id={category_id}")
+        print("All records:", records)
+
         if not user_id and not category_id:
             return jsonify({"error": "Either user_id or category_id is required"}), 400
+        
         filtered_records = [
             record for record in records.values()
             if (not user_id or record["user_id"] == user_id) and
                (not category_id or record["category_id"] == category_id)
         ]
+        
+        print("Filtered records:", filtered_records)
+        
         return jsonify(filtered_records)
+
 
 
 if __name__ == '__main__':
