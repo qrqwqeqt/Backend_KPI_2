@@ -10,18 +10,15 @@
    git clone <https://github.com/qrqwqeqt/Backend_KPI_2>
    ```
    
-3. **Встановити залежності:**
+2. ****Build and run the application using Docker Compose:**
    ```bash
-   pip install -r requirements.txt
+   docker-compose up --build
    ```
 
-4. **Запустити сервер:**
-   ```bash
-   python app/routes.py
+3. ****Access the application in your browser or API client:**
    ```
-
-5. **Доступ до API:**
-   Сервер буде доступний за адресою: [http://localhost:5000](http://localhost:5000)
+   http://localhost:5000
+   ```
    
 
 ## Тестування
