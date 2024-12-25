@@ -1,10 +1,22 @@
 from flask import Flask, jsonify, request
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+import os
+
 
 app = Flask(__name__)
+app.config.from_object("app.config.Config")
+
+db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 
 users = {}
 categories = {}
 records = {}
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False)
 
 def generate_id(data_store):
     return max(data_store.keys(), default=0) + 1
