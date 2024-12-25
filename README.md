@@ -34,3 +34,5 @@
 2. Перейдіть до **File → Import**.
 3. Завантажте файл `postman_collection.json`.
 4. Використовуйте ендпоінти для тестування API.
+
+### Деплой по [посиланню](https://backend-kpi-2.onrender.com)
