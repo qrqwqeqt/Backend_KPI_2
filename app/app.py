@@ -1,50 +1,56 @@
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from marshmallow import Schema, fields, ValidationError
+from marshmallow import Schema, fields, validates, validates_schema, ValidationError
 from datetime import datetime
+from app.models import db, User, Category, Record, Account
 
 app = Flask(__name__)
 app.config.from_pyfile('config.py')
 
-db = SQLAlchemy(app)
+db.init_app(app)
 migrate = Migrate(app, db)
 
-# SQLAlchemy Models
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(80), nullable=False)
-    records = db.relationship('Record', backref='user', lazy=True, cascade="all, delete-orphan")
 
-    def __repr__(self):
-        return f'<User {self.name}>'
-
-class Category(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(80), nullable=False)
-    records = db.relationship('Record', backref='category', lazy=True, cascade="all, delete-orphan")
-
-    def __repr__(self):
-        return f'<Category {self.name}>'
-
-class Record(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=False)
-    amount = db.Column(db.Float, nullable=False)
-    date_time = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-
-    def __repr__(self):
-        return f'<Record {self.id}>'
-
-# Marshmallow Schemas
+# Schemas
 class UserSchema(Schema):
     id = fields.Int(dump_only=True)
     name = fields.Str(required=True)
 
+    @validates('name')
+    def validate_name(self, value):
+        if len(value.strip()) < 2:
+            raise ValidationError('Name must be at least 2 characters long')
+
+class AccountSchema(Schema):
+    id = fields.Int(dump_only=True)
+    user_id = fields.Int(required=True)
+    balance = fields.Float(dump_only=True)
+    initial_balance = fields.Float(load_only=True, missing=0.0)
+    created_at = fields.DateTime(dump_only=True)
+    updated_at = fields.DateTime(dump_only=True)
+
+    @validates('initial_balance')
+    def validate_initial_balance(self, value):
+        if value < 0:
+            raise ValidationError('Initial balance cannot be negative')
+
+class DepositSchema(Schema):
+    amount = fields.Float(required=True)
+
+    @validates('amount')
+    def validate_amount(self, value):
+        if value <= 0:
+            raise ValidationError('Amount must be positive')
+
 class CategorySchema(Schema):
     id = fields.Int(dump_only=True)
     name = fields.Str(required=True)
+
+    @validates('name')
+    def validate_name(self, value):
+        if len(value.strip()) < 2:
+            raise ValidationError('Name must be at least 2 characters long')
 
 class RecordSchema(Schema):
     id = fields.Int(dump_only=True)
@@ -53,13 +59,38 @@ class RecordSchema(Schema):
     amount = fields.Float(required=True)
     date_time = fields.DateTime(dump_default=datetime.utcnow)
 
+    @validates('amount')
+    def validate_amount(self, value):
+        if value <= 0:
+            raise ValidationError('Amount must be positive')
+
+    @validates_schema
+    def validate_associations(self, data, **kwargs):
+        user = User.query.get(data['user_id'])
+        if not user:
+            raise ValidationError('User does not exist')
+            
+        category = Category.query.get(data['category_id'])
+        if not category:
+            raise ValidationError('Category does not exist')
+            
+        account = Account.query.filter_by(user_id=data['user_id']).first()
+        if not account:
+            raise ValidationError('User has no account')
+            
+        if account.balance < data['amount']:
+            raise ValidationError('Insufficient funds')
+
 # Initialize schemas
 user_schema = UserSchema()
 users_schema = UserSchema(many=True)
+account_schema = AccountSchema()
+accounts_schema = AccountSchema(many=True)
 category_schema = CategorySchema()
 categories_schema = CategorySchema(many=True)
 record_schema = RecordSchema()
 records_schema = RecordSchema(many=True)
+deposit_schema = DepositSchema()
 
 # Error handlers
 @app.errorhandler(404)
@@ -124,6 +155,71 @@ def delete_user(id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+# Account endpoints
+@app.route('/accounts', methods=['POST'])
+def create_account():
+    try:
+        data = account_schema.load(request.json)
+        user = User.query.get(data['user_id'])
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+            
+        existing_account = Account.query.filter_by(user_id=data['user_id']).first()
+        if existing_account:
+            return jsonify({'error': 'User already has an account'}), 400
+            
+        account = Account(
+            user_id=data['user_id'],
+            initial_balance=data.get('initial_balance', 0.0)
+        )
+        db.session.add(account)
+        db.session.commit()
+        return account_schema.dump(account), 201
+    except ValidationError as err:
+        return jsonify({'error': 'Validation error', 'messages': err.messages}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/accounts/<int:id>', methods=['GET'])
+def get_account(id):
+    try:
+        account = Account.query.get(id)
+        if account is None:
+            return jsonify({'error': 'Account not found'}), 404
+        return account_schema.dump(account)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/accounts/<int:id>/deposit', methods=['POST'])
+def deposit_to_account(id):
+    try:
+        data = deposit_schema.load(request.json)
+        account = Account.query.get(id)
+        if account is None:
+            return jsonify({'error': 'Account not found'}), 404
+            
+        account.deposit(data['amount'])
+        db.session.commit()
+        return account_schema.dump(account)
+    except ValidationError as err:
+        return jsonify({'error': 'Validation error', 'messages': err.messages}), 400
+    except ValueError as err:
+        return jsonify({'error': str(err)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/accounts/<int:id>/balance', methods=['GET'])
+def get_balance(id):
+    try:
+        account = Account.query.get(id)
+        if account is None:
+            return jsonify({'error': 'Account not found'}), 404
+        return jsonify({'balance': account.balance})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # Category endpoints
 @app.route('/categories', methods=['POST'])
 def create_category():
@@ -175,27 +271,16 @@ def delete_category(id):
 def create_record():
     try:
         data = record_schema.load(request.json)
-        
-        # Проверяем существование user и category
-        user = User.query.get(data['user_id'])
-        if not user:
-            return jsonify({'error': f"User with id {data['user_id']} not found"}), 404
-            
-        category = Category.query.get(data['category_id'])
-        if not category:
-            return jsonify({'error': f"Category with id {data['category_id']} not found"}), 404
-            
-        record = Record(
+        record = Record.create_with_withdrawal(
             user_id=data['user_id'],
             category_id=data['category_id'],
-            amount=data['amount'],
-            date_time=datetime.utcnow()
+            amount=data['amount']
         )
-        db.session.add(record)
-        db.session.commit()
         return record_schema.dump(record), 201
     except ValidationError as err:
         return jsonify({'error': 'Validation error', 'messages': err.messages}), 400
+    except ValueError as err:
+        return jsonify({'error': str(err)}), 400
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
