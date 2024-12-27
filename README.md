@@ -1,4 +1,5 @@
 # Інструкція з налаштування та запуску
+# Варіант додаткового завдання - 3(Облік доходів)
 
 ### Вимоги
 - Python 3.9 або вище
@@ -23,7 +24,7 @@
 
 ## Тестування
 Для тестування використовуйте [Postman](https://www.postman.com/). 
-Посилання на  [PostmanFlow](https://web.postman.co/workspace/My-Workspace~d441e550-bbde-42a4-8a76-edf6be089d45/flow/674f40a454fc950032a0e790).
+
 
 
 
@@ -35,4 +36,3 @@
 3. Завантажте файл `postman_collection.json`.
 4. Використовуйте ендпоінти для тестування API.
 
-### Деплой по [посиланню](https://backend-kpi-2.onrender.com)
