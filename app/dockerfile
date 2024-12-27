@@ -1,21 +1,28 @@
-# Используем базовый образ Python
 FROM python:3.9-slim
 
-# Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Копируем файл зависимостей
-COPY requirements.txt requirements.txt
+RUN apt-get update && \
+    apt-get install -y gcc libpq-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Обновляем pip и устанавливаем зависимости
-RUN apt-get update && apt-get install -y libpq-dev
-RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем исходный код приложения
+
 COPY . .
 
-# Указываем порт, на котором работает приложение
+
+RUN chmod +x init.sh && \
+    sed -i 's/\r$//' init.sh
+
+
+ENV FLASK_APP=app.py
+ENV FLASK_ENV=development
+ENV PYTHONPATH=/app
+
 EXPOSE 5000
 
-# Команда запуска приложения
-CMD ["python", "routes.py"]
+
+CMD ["./init.sh"]
