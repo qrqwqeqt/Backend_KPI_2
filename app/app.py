@@ -1,12 +1,17 @@
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
+import os
 from flask_migrate import Migrate
 from marshmallow import Schema, fields, validates, validates_schema, ValidationError
 from datetime import datetime
-from app.models import db, User, Category, Record, Account
+from .models import db, User, Category, Record, Account
+from flask_jwt_extended import JWTManager, create_access_token, get_jwt_identity, jwt_required
+from passlib.hash import pbkdf2_sha256
 
 app = Flask(__name__)
 app.config.from_pyfile('config.py')
+app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "your-secret-key")  # Replace in production
+jwt = JWTManager(app)
 
 db.init_app(app)
 migrate = Migrate(app, db)
@@ -16,11 +21,17 @@ migrate = Migrate(app, db)
 class UserSchema(Schema):
     id = fields.Int(dump_only=True)
     name = fields.Str(required=True)
+    password = fields.Str(required=True, load_only=True)
 
     @validates('name')
     def validate_name(self, value):
         if len(value.strip()) < 2:
             raise ValidationError('Name must be at least 2 characters long')
+            
+    @validates('password')
+    def validate_password(self, value):
+        if len(value) < 6:
+            raise ValidationError('Password must be at least 6 characters long')
 
 class AccountSchema(Schema):
     id = fields.Int(dump_only=True)
@@ -110,12 +121,16 @@ def handle_error(error):
     return jsonify({'error': str(error)}), 500
 
 # User endpoints
-@app.route('/users', methods=['POST'])
-def create_user():
+@app.route('/register', methods=['POST'])
+def register():
     try:
         data = user_schema.load(request.json)
-        user = User(name=data['name'])
-        db.session.add(user)
+        existing_user = User.query.filter_by(name=data['name']).first()
+        
+        if existing_user:
+            return jsonify({'error': 'Username already exists'}), 400
+            
+        user = User(name=data['name'], password=data['password'])
         db.session.commit()
         return user_schema.dump(user), 201
     except ValidationError as err:
@@ -125,6 +140,7 @@ def create_user():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/users', methods=['GET'])
+@jwt_required()
 def get_users():
     try:
         users = User.query.all()
@@ -143,6 +159,7 @@ def get_user(id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/users/<int:id>', methods=['DELETE'])
+@jwt_required()
 def delete_user(id):
     try:
         user = User.query.get(id)
@@ -157,6 +174,7 @@ def delete_user(id):
 
 # Account endpoints
 @app.route('/accounts', methods=['POST'])
+@jwt_required()
 def create_account():
     try:
         data = account_schema.load(request.json)
@@ -182,6 +200,7 @@ def create_account():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/accounts/<int:id>', methods=['GET'])
+@jwt_required()
 def get_account(id):
     try:
         account = Account.query.get(id)
@@ -192,6 +211,7 @@ def get_account(id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/accounts/<int:id>/deposit', methods=['POST'])
+@jwt_required()
 def deposit_to_account(id):
     try:
         data = deposit_schema.load(request.json)
@@ -211,6 +231,7 @@ def deposit_to_account(id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/accounts/<int:id>/balance', methods=['GET'])
+@jwt_required()
 def get_balance(id):
     try:
         account = Account.query.get(id)
@@ -222,6 +243,7 @@ def get_balance(id):
 
 # Category endpoints
 @app.route('/categories', methods=['POST'])
+@jwt_required()
 def create_category():
     try:
         data = category_schema.load(request.json)
@@ -236,6 +258,7 @@ def create_category():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/categories', methods=['GET'])
+@jwt_required()
 def get_categories():
     try:
         categories = Category.query.all()
@@ -244,6 +267,7 @@ def get_categories():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/categories/<int:id>', methods=['GET'])
+@jwt_required()
 def get_category(id):
     try:
         category = Category.query.get(id)
@@ -254,6 +278,7 @@ def get_category(id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/categories/<int:id>', methods=['DELETE'])
+@jwt_required()
 def delete_category(id):
     try:
         category = Category.query.get(id)
@@ -268,6 +293,7 @@ def delete_category(id):
 
 # Record endpoints
 @app.route('/records', methods=['POST'])
+@jwt_required()
 def create_record():
     try:
         data = record_schema.load(request.json)
@@ -286,6 +312,7 @@ def create_record():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/records', methods=['GET'])
+@jwt_required()
 def get_records():
     try:
         records = Record.query.all()
@@ -294,6 +321,7 @@ def get_records():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/records/<int:id>', methods=['GET'])
+@jwt_required()
 def get_record(id):
     try:
         record = Record.query.get(id)
@@ -302,6 +330,42 @@ def get_record(id):
         return record_schema.dump(record)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/login', methods=['POST'])
+def login():
+    try:
+        data = request.get_json()
+        user = User.query.filter_by(name=data['name']).first()
+        
+        if user and pbkdf2_sha256.verify(data['password'], user.password):
+            access_token = create_access_token(identity=user.id)
+            return jsonify({'access_token': access_token}), 200
+            
+        return jsonify({'error': 'Invalid credentials'}), 401
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@jwt.expired_token_loader
+def expired_token_callback(jwt_header, jwt_payload):
+    return jsonify({
+        "error": "token_expired",
+        "message": "The token has expired"
+    }), 401
+    
+@jwt.invalid_token_loader
+def invalid_token_callback(error):
+    return jsonify({
+        "error": "invalid_token",
+        "message": "Signature verification failed"
+    }), 401
+
+@jwt.unauthorized_loader
+def missing_token_callback(error):
+    return jsonify({
+        "error": "authorization_required",
+        "message": "Request does not contain an access token"
+    }), 401
 
 if __name__ == '__main__':
     app.run(debug=True)

@@ -1,6 +1,7 @@
 from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import select, func
+from passlib.hash import pbkdf2_sha256
 
 db = SQLAlchemy()
 
@@ -33,13 +34,15 @@ def get_smallest_available_id(model):
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), nullable=False)
+    password = db.Column(db.String(256), nullable=False)
     accounts = db.relationship('Account', backref='user', lazy=True, cascade="all, delete-orphan")
     records = db.relationship('Record', backref='user', lazy=True, cascade="all, delete-orphan")
-
-    def __init__(self, name):
+    
+    def __init__(self, name, password):
         self.name = name
+        self.password = pbkdf2_sha256.hash(password)
         db.session.add(self)
-        db.session.flush()  # Needed to get ID before commit
+        db.session.flush()
         self.id = get_smallest_available_id(User)
 
     def to_dict(self):
